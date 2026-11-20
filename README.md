@@ -33,6 +33,16 @@ Quotes and charts come from Yahoo Finance's unofficial `v8/finance/chart` and `v
 
 Public proxies can be slow or disappear. You can enter your own proxy in **Settings → Data source → Custom** as a URL template containing `{url}`, for example a Cloudflare Worker at `https://my-proxy.workers.dev/?url={url}`.
 
+To keep relays from rate-limiting the app, the whole watchlist is fetched in one batched request. If a relay hasn't answered after 2.5 seconds, the next one starts in parallel, and relays that fail are benched for a few minutes. Charts are cached, and the 1D chart opens instantly from the watchlist's own data.
+
+### Your own proxy (fastest and most reliable)
+
+`worker/proxy.js` is a ready-made Cloudflare Worker that only forwards requests to Yahoo. To set it up:
+
+1. Go to **dash.cloudflare.com → Workers & Pages → Create → Hello World**.
+2. Click **Edit code**, paste in `worker/proxy.js`, then click **Deploy**.
+3. In Ziggy, go to **Settings → Data source → Custom** and enter `https://<name>.<subdomain>.workers.dev/?url={url}`.
+
 Data is often delayed and is **not suitable for trading decisions**.
 
 ## Tests

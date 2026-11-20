@@ -39,13 +39,29 @@ function chart(symbol, range, price, prev) {
 /** Install proxy interception. `opts.failProxies` lists proxy hosts to fail. */
 async function mockData(page, opts = {}) {
   const calls = [];
+  calls.targets = [];
   const handler = async (route) => {
     const req = new URL(route.request().url());
     calls.push(req.host);
+    if ((opts.stallProxies || []).includes(req.host)) return; // never answers
     if (opts.offline || (opts.failProxies || []).includes(req.host)) {
       return route.fulfill({ status: 503, body: 'Service unavailable' });
     }
     const target = new URL(req.searchParams.get('url') || req.searchParams.get('quest'));
+    calls.targets.push(target);
+    if (target.pathname.includes('/finance/spark')) {
+      if (opts.noSpark) {
+        return route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ finance: { result: null, error: { code: 'Unauthorized', description: 'Invalid Crumb' } } }) });
+      }
+      const result = target.searchParams.get('symbols').split(',')
+        .filter((sym) => ((opts.prices && opts.prices[sym]) || PRICES[sym]) && !(opts.sparkSkips || []).includes(sym))
+        .map((sym) => {
+          const r = chart(sym, '1d', ...((opts.prices && opts.prices[sym]) || PRICES[sym])).chart.result[0];
+          const { longName, fullExchangeName, regularMarketDayHigh, regularMarketDayLow, ...lean } = r.meta;
+          return { symbol: sym, response: [{ ...r, meta: lean }] };
+        });
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ spark: { result, error: null } }) });
+    }
     if (target.pathname.includes('/v1/finance/search')) {
       const q = target.searchParams.get('q').toUpperCase();
       const quotes = Object.keys(PRICES).filter((s) => s.includes(q)).map((s) => ({ symbol: s, shortname: `${s} Test Co`, exchDisp: 'NASDAQ', typeDisp: 'Equity' }));

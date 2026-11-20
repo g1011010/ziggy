@@ -1,5 +1,5 @@
 import { store } from './store.js';
-import { getQuote, getChart, search, mapLimit, fetchJSON, PROXIES, RANGES } from './api.js';
+import { getQuote, getQuotes, getChart, peekChart, isChartFresh, search, fetchJSON, PROXIES, RANGES } from './api.js';
 import { evaluate, newAlert, notify, notificationState, requestNotifications } from './alerts.js';
 import { sparkline, detailChart } from './chart.js';
 import { esc, fmtPrice, fmtChange, fmtPct, fmtTime, fmtDateTime, isMarketOpen } from './format.js';
@@ -78,7 +78,7 @@ async function refresh({ manual = false } = {}) {
   setRefreshSpinner(true);
 
   const symbols = trackedSymbols();
-  const results = await mapLimit(symbols, 4, getQuote);
+  const results = await getQuotes(symbols);
   const prices = {};
   let okCount = 0;
   let firstErr = null;
@@ -87,10 +87,11 @@ async function refresh({ manual = false } = {}) {
     const sym = symbols[i];
     if (r.ok) {
       okCount++;
-      const entry = { quote: r.value.quote, series: r.value.series, ts: Date.now() };
+      // Batched responses can be leaner (no name, ranges…): keep earlier details.
+      const entry = { quote: mergeQuote(state.quotes[sym]?.quote, r.value.quote), series: r.value.series, ts: Date.now() };
       state.quotes[sym] = { ...entry, stale: false };
       store.setCached(sym, entry);
-      store.setMeta(sym, { name: r.value.quote.name });
+      if (r.value.quote.name) store.setMeta(sym, { name: r.value.quote.name });
       prices[sym] = r.value.quote.price;
     } else {
       firstErr = firstErr || r.error;
@@ -119,6 +120,13 @@ async function refresh({ manual = false } = {}) {
     else if (okCount < symbols.length) toast('Partly updated', `${okCount} of ${symbols.length} symbols updated.`);
     else toast('Prices updated', `${okCount} symbols · ${fmtTime(state.lastUpdated)}`);
   }
+}
+
+function mergeQuote(prev, next) {
+  if (!prev) return next;
+  const out = { ...prev };
+  for (const [k, v] of Object.entries(next)) if (v != null && v !== '') out[k] = v;
+  return out;
 }
 
 function setRefreshSpinner(on) {
@@ -481,7 +489,7 @@ function openDetail(symbol) {
   const el = $('#detail');
   if (state.detail?.symbol === symbol) return;
   closeDetail();
-  state.detail = { symbol, range: '1D', destroy: null, series: null, quote: null, cache: {} };
+  state.detail = { symbol, range: '1D', destroy: null, series: null, quote: null };
   el.hidden = false;
   el.scrollTop = 0;
   const inList = store.getWatchlist().includes(symbol);
@@ -613,28 +621,38 @@ async function loadDetailChart() {
   if (!d) return;
   const { symbol, range } = d;
   const msg = $('#d-msg');
-  msg.hidden = false;
-  msg.textContent = 'Loading chart…';
 
-  const cached = d.cache[range];
-  let data;
+  // 1) Show something immediately: a cached chart for this range, or for 1D
+  //    the intraday series the watchlist already has.
+  const cached = peekChart(symbol, range);
+  const wl = state.quotes[symbol];
+  const instant = cached?.data
+    || (range === '1D' && wl?.series?.v?.length > 1 ? { quote: wl.quote, series: wl.series } : null);
+  if (instant) showDetailData(d, range, instant);
+  else { msg.hidden = false; msg.textContent = 'Loading chart…'; }
+
+  // 2) Fetch fresh data if needed and redraw.
+  if (isChartFresh(symbol, range)) return;
   try {
-    data = cached && Date.now() - cached.at < 60_000 ? cached.data : await getChart(symbol, range);
-    d.cache[range] = { at: Date.now(), data };
+    const data = await getChart(symbol, range);
+    if (state.detail !== d || d.range !== range) return; // user moved on
+    showDetailData(d, range, data);
   } catch (e) {
     if (state.detail !== d || d.range !== range) return;
-    msg.textContent = `Couldn't load chart. ${e.message || ''}`;
-    return;
+    if (!instant) { msg.hidden = false; msg.textContent = `Couldn't load chart. ${e.message || ''}`; }
   }
-  if (state.detail !== d || d.range !== range) return; // user moved on
+}
 
-  if (!state.quotes[symbol]) d.quote = data.quote;
+function showDetailData(d, range, data) {
+  const msg = $('#d-msg');
+  if (!state.quotes[d.symbol]) d.quote = data.quote;
   d.series = data.series;
   d.destroy?.();
   d.destroy = null;
 
   if (data.series.v.length < 2) {
     $('#d-chart').innerHTML = '';
+    msg.hidden = false;
     msg.textContent = 'No chart data for this range.';
     updateDetailHeader();
     return;
@@ -648,7 +666,8 @@ async function loadDetailChart() {
   const up = range === '1D' && q.prevClose != null ? last >= q.prevClose : last >= first;
 
   const startChart = () => {
-    if (state.detail !== d) return;
+    if (state.detail !== d || d.range !== range) return;
+    d.destroy?.();
     d.destroy = detailChart($('#d-chart'), data.series, {
       up, baseline, intraday: range === '1D' || range === '5D',
       onScrub: (idx) => updateDetailHeader(idx),

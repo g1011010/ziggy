@@ -277,6 +277,62 @@ test('requests carry a cache-busting parameter', async () => {
   await ctx.close();
 });
 
+test('watchlist uses one batched request; misses fall back per symbol', async () => {
+  const { ctx, page, errors } = await newPage();
+  const calls = await mockData(page, { sparkSkips: ['MSFT'] });
+  await page.goto(base);
+  await page.waitForSelector('.row[data-sym="MSFT"] .px b:text("420.00")');
+  await page.waitForSelector('.row[data-sym="AAPL"] .px b:text("190.00")');
+  const paths = calls.targets.map((t) => t.pathname);
+  assert.equal(paths.filter((p) => p.includes('/spark')).length, 1);
+  assert.deepEqual(paths.filter((p) => p.includes('/chart/')).map((p) => decodeURIComponent(p.split('/').pop())), ['MSFT']);
+  // Names from the richer per-symbol response survive later lean batch refreshes.
+  await page.click('#refresh-btn');
+  await page.waitForSelector('.toast:has-text("Prices updated")');
+  assert.equal(await page.textContent('.row[data-sym="MSFT"] .sym small'), 'MSFT Test Co');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('falls back to per-symbol requests when batching is rejected', async () => {
+  const { ctx, page, errors } = await newPage();
+  const calls = await mockData(page, { noSpark: true });
+  await page.goto(base);
+  await page.waitForSelector('.row[data-sym="ETH-USD"] .px b:text("3,400.00")');
+  await page.click('#refresh-btn');
+  await page.waitForSelector('.toast:has-text("Prices updated")');
+  // After one rejected batch, the app stops trying batches this session.
+  assert.equal(calls.targets.filter((t) => t.pathname.includes('/spark')).length, 1);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('a stalled proxy is overtaken by the next one within seconds', async () => {
+  const { ctx, page, errors } = await newPage();
+  await mockData(page, { stallProxies: ['corsproxy.io'] });
+  const t0 = Date.now();
+  await page.goto(base);
+  await page.waitForSelector('.row[data-sym="AAPL"] .px b:text("190.00")');
+  const ms = Date.now() - t0;
+  assert.ok(ms < 6000, `took ${ms} ms`);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('1D chart appears instantly from watchlist data even if the network stalls', async () => {
+  const { ctx, page, errors } = await newPage();
+  await mockData(page);
+  await page.goto(base);
+  await page.waitForSelector('.row[data-sym="AAPL"] .px b:text("190.00")');
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+  await page.route(/corsproxy\.io|allorigins\.win|codetabs\.com/, () => { /* never answers */ });
+  await page.click('.row[data-sym="AAPL"] .sym');
+  await page.waitForSelector('#d-chart canvas', { timeout: 1500 });
+  assert.ok(await page.$eval('#d-msg', (m) => m.hidden));
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 test('manifest and service worker are valid', async () => {
   const m = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.webmanifest'), 'utf8'));
   assert.equal(m.display, 'standalone');
@@ -291,7 +347,7 @@ test('manifest and service worker are valid', async () => {
   await mockData(page);
   await page.goto(base);
   await page.evaluate(() => navigator.serviceWorker.ready);
-  const cached = await page.evaluate(async () => (await (await caches.open('ziggy-v3')).keys()).length);
+  const cached = await page.evaluate(async () => (await (await caches.open('ziggy-v4')).keys()).length);
   assert.ok(cached >= shell.length, `cached ${cached}`);
   await ctx.close();
 });
