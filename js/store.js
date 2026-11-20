@@ -18,7 +18,13 @@ function write(key, value) {
   try { localStorage.setItem(PREFIX + key, JSON.stringify(value)); } catch { /* memory only */ }
 }
 
-export const DEFAULT_WATCHLIST = ['^GSPC', '^IXIC', 'AAPL', 'MSFT', 'EURUSD=X', 'BTC-USD'];
+export const DEFAULT_WATCHLIST = ['^GSPC', '^IXIC', 'AAPL', 'MSFT', 'NVDA', 'GOOGL', 'EURUSD=X', 'BTC-USD', 'ETH-USD'];
+
+// One-time additions merged into existing saved watchlists. Each batch runs
+// once per device, so anything the user later removes stays removed.
+const SEED_BATCHES = [
+  ['NVDA', 'GOOGL', 'AAPL', 'BTC-USD', 'ETH-USD', '^IXIC'],
+];
 
 export const DEFAULT_SETTINGS = {
   refresh: 60,          // seconds; 0 = manual
@@ -30,9 +36,23 @@ export const DEFAULT_SETTINGS = {
 export const store = {
   getWatchlist() {
     const w = read('watchlist', null);
-    return Array.isArray(w) ? w : [...DEFAULT_WATCHLIST];
+    if (!Array.isArray(w)) return [...DEFAULT_WATCHLIST];
+    const seeded = read('seedVersion', 0);
+    if (seeded < SEED_BATCHES.length) {
+      const merged = [...w];
+      for (const batch of SEED_BATCHES.slice(seeded)) {
+        for (const sym of batch) if (!merged.includes(sym)) merged.push(sym);
+      }
+      write('watchlist', merged);
+      write('seedVersion', SEED_BATCHES.length);
+      return merged;
+    }
+    return w;
   },
-  setWatchlist(list) { write('watchlist', [...new Set(list)]); },
+  setWatchlist(list) {
+    write('watchlist', [...new Set(list)]);
+    write('seedVersion', SEED_BATCHES.length);
+  },
 
   getMeta() { return read('meta', {}); },
   setMeta(symbol, info) {

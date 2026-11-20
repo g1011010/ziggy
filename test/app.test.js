@@ -47,7 +47,7 @@ test('watchlist loads default symbols with prices', async () => {
   await page.goto(base);
   await page.waitForSelector('.row[data-sym="AAPL"] .px b:text("190.00")');
   const syms = await page.$$eval('.row', (rs) => rs.map((r) => r.dataset.sym));
-  assert.deepEqual(syms, ['^GSPC', '^IXIC', 'AAPL', 'MSFT', 'EURUSD=X', 'BTC-USD']);
+  assert.deepEqual(syms, ['^GSPC', '^IXIC', 'AAPL', 'MSFT', 'NVDA', 'GOOGL', 'EURUSD=X', 'BTC-USD', 'ETH-USD']);
   assert.match(await page.textContent('.row[data-sym="AAPL"] .chg'), /\+1\.33%/);
   assert.ok(await page.$('.row[data-sym="MSFT"] .chg.down'));
   assert.equal(await page.textContent('.row[data-sym="EURUSD=X"] .px b'), '1.0832');
@@ -72,7 +72,7 @@ test('search adds a symbol and it persists across reload', async () => {
   await page.waitForSelector('.row[data-sym="VOD.L"] .px b:text("72.40")');
   await page.reload();
   await page.waitForSelector('.row[data-sym="VOD.L"]');
-  assert.equal((await page.$$('.row')).length, 7);
+  assert.equal((await page.$$('.row')).length, 10);
   assert.deepEqual(errors, []);
   await ctx.close();
 });
@@ -186,7 +186,7 @@ test('swipe left reveals delete; edit mode reorders and removes', async () => {
   await page.mouse.move(h.x + h.width / 2, target.y + target.height * 0.9, { steps: 12 });
   await page.mouse.up();
   const order = await page.evaluate(() => JSON.parse(localStorage.getItem('ziggy:watchlist')));
-  assert.deepEqual(order, ['^IXIC', 'AAPL', '^GSPC', 'EURUSD=X', 'BTC-USD']);
+  assert.deepEqual(order, ['^IXIC', 'AAPL', '^GSPC', 'NVDA', 'GOOGL', 'EURUSD=X', 'BTC-USD', 'ETH-USD']);
   await page.click('.row[data-sym="BTC-USD"] .rm');
   await page.waitForFunction(() => !document.querySelector('.row[data-sym="BTC-USD"]'));
   assert.deepEqual(errors, []);
@@ -200,7 +200,7 @@ test('settings: export/import round-trip and unknown symbol handling', async () 
   const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#export')]);
   const data = JSON.parse(fs.readFileSync(await dl.path(), 'utf8'));
   assert.equal(data.app, 'ziggy');
-  assert.equal(data.watchlist.length, 6);
+  assert.equal(data.watchlist.length, 9);
   data.watchlist = ['AAPL', 'NOPE123'];
   const tmp = path.join(require('node:os').tmpdir(), `ziggy-import-${Date.now()}.json`);
   fs.writeFileSync(tmp, JSON.stringify(data));
@@ -210,6 +210,30 @@ test('settings: export/import round-trip and unknown symbol handling', async () 
   await page.waitForSelector('.row[data-sym="AAPL"] .px b:text("190.00")');
   // Unknown symbol stays listed without a price, and nothing crashes.
   assert.equal(await page.textContent('.row[data-sym="NOPE123"] .px b'), '—');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('existing saved watchlists get new symbols merged in once', async () => {
+  const { ctx, page, errors } = await newPage();
+  await mockData(page);
+  await page.addInitScript(() => {
+    if (!sessionStorage.getItem('seeded')) {
+      sessionStorage.setItem('seeded', '1');
+      localStorage.setItem('ziggy:watchlist', JSON.stringify(['TSLA', 'AAPL']));
+    }
+  });
+  await page.goto(base);
+  await page.waitForSelector('.row[data-sym="ETH-USD"]');
+  let syms = await page.$$eval('.row', (rs) => rs.map((r) => r.dataset.sym));
+  assert.deepEqual(syms, ['TSLA', 'AAPL', 'NVDA', 'GOOGL', 'BTC-USD', 'ETH-USD', '^IXIC']);
+  // A removed symbol does not come back.
+  await page.click('#edit-btn');
+  await page.click('.row[data-sym="NVDA"] .rm');
+  await page.reload();
+  await page.waitForSelector('.row[data-sym="ETH-USD"]');
+  syms = await page.$$eval('.row', (rs) => rs.map((r) => r.dataset.sym));
+  assert.ok(!syms.includes('NVDA'));
   assert.deepEqual(errors, []);
   await ctx.close();
 });
@@ -228,7 +252,7 @@ test('manifest and service worker are valid', async () => {
   await mockData(page);
   await page.goto(base);
   await page.evaluate(() => navigator.serviceWorker.ready);
-  const cached = await page.evaluate(async () => (await (await caches.open('ziggy-v1')).keys()).length);
+  const cached = await page.evaluate(async () => (await (await caches.open('ziggy-v2')).keys()).length);
   assert.ok(cached >= shell.length, `cached ${cached}`);
   await ctx.close();
 });

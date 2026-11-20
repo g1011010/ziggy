@@ -3,6 +3,7 @@
 const PRICES = {
   '^GSPC': [5900, 5850], '^IXIC': [19000, 19100], AAPL: [190, 187.5], MSFT: [420, 425],
   'EURUSD=X': [1.0832, 1.0811], 'BTC-USD': [97000, 95000], 'VOD.L': [72.4, 71.9], TSLA: [250, 240],
+  NVDA: [145, 141], GOOGL: [178, 176.2], 'ETH-USD': [3400, 3350],
 };
 
 function chart(symbol, range, price, prev) {

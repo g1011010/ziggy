@@ -2,7 +2,7 @@
 // Market data (cross-origin) always goes to the network; the app keeps its
 // own last-known prices for offline display.
 
-const VERSION = 'ziggy-v1';
+const VERSION = 'ziggy-v2';
 const SHELL = [
   './',
   'index.html',
