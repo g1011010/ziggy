@@ -29,7 +29,7 @@ before(async () => {
 
 after(async () => { await browser?.close(); server?.close(); });
 
-const { mockData } = require('./fixtures.js');
+const { mockData, mockFinnhub } = require('./fixtures.js');
 
 async function newPage(contextOpts = {}) {
   const ctx = await browser.newContext({ ...devices['iPhone 13'], serviceWorkers: 'block', ...contextOpts });
@@ -333,6 +333,103 @@ test('1D chart appears instantly from watchlist data even if the network stalls'
   await ctx.close();
 });
 
+async function withKey(page, key = 'test-key') {
+  await page.addInitScript((k) => {
+    if (!sessionStorage.getItem('keyed')) {
+      sessionStorage.setItem('keyed', '1');
+      localStorage.setItem('ziggy:settings', JSON.stringify({ finnhubKey: k }));
+    }
+  }, key);
+}
+
+test('finnhub: US stocks and crypto priced from Finnhub, indices/FX from Yahoo', async () => {
+  const { ctx, page, errors } = await newPage();
+  await withKey(page);
+  const yahoo = await mockData(page);
+  const fh = await mockFinnhub(page);
+  await page.goto(base);
+  await page.waitForSelector('.row[data-sym="AAPL"] .px b:text("191.11")');
+  await page.waitForSelector('.row[data-sym="BTC-USD"] .px b:text("97,111.00")');
+  await page.waitForSelector('.row[data-sym="^GSPC"] .px b:text("5,900.00")');
+  await page.waitForSelector('.row[data-sym="EURUSD=X"] .px b:text("1.0832")');
+  // Yahoo's batch was only asked for what Finnhub doesn't cover (plus the background sparkline backfill).
+  const firstSpark = yahoo.targets.find((t) => t.pathname.includes('/spark'));
+  assert.deepEqual(firstSpark.searchParams.get('symbols').split(','), ['^GSPC', '^IXIC', 'EURUSD=X']);
+  assert.ok(fh.includes('/api/v1/quote?BINANCE:ETHUSDT'));
+  // Company names come from Finnhub profiles; sparklines get backfilled from Yahoo.
+  await page.waitForSelector('.row[data-sym="NVDA"] .sym small:text("NVDA Finnhub Inc")');
+  await page.waitForFunction(() => document.querySelectorAll('.row[data-sym="AAPL"] svg.spark path').length === 1);
+  // Live Finnhub price is kept after the Yahoo backfill.
+  assert.equal(await page.textContent('.row[data-sym="AAPL"] .px b'), '191.11');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('finnhub: chart falls back to Yahoo when candles are not in the plan', async () => {
+  const { ctx, page, errors } = await newPage();
+  await withKey(page);
+  await mockData(page);
+  const fh = await mockFinnhub(page);
+  await page.goto(base);
+  await page.waitForSelector('.row[data-sym="AAPL"] .px b:text("191.11")');
+  await page.click('.row[data-sym="AAPL"] .sym');
+  await page.click('#d-ranges button[data-range="1Y"]');
+  await page.waitForFunction(() => document.querySelector('#d-msg').hidden && document.querySelector('#d-chart canvas'));
+  await page.click('#d-ranges button[data-range="5Y"]');
+  await page.waitForFunction(() => document.querySelector('#d-msg').hidden && document.querySelector('#d-chart canvas'));
+  // After the first 403, Finnhub candles aren't requested again.
+  assert.equal(fh.filter((c) => c.includes('/candle')).length, 1);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('finnhub: candles used when the plan allows them', async () => {
+  const { ctx, page, errors } = await newPage();
+  await withKey(page);
+  const yahoo = await mockData(page);
+  await mockFinnhub(page, { candles: 'ok' });
+  await page.goto(base);
+  await page.waitForSelector('.row[data-sym="AAPL"] .px b:text("191.11")');
+  await page.click('.row[data-sym="AAPL"] .sym');
+  await page.click('#d-ranges button[data-range="1M"]');
+  await page.waitForFunction(() => document.querySelector('#d-msg').hidden && document.querySelector('#d-chart canvas'));
+  assert.ok(!yahoo.targets.some((t) => t.pathname.endsWith('/AAPL') && t.searchParams.get('range') === '1mo'));
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('finnhub: invalid key falls back to Yahoo and Settings reports it', async () => {
+  const { ctx, page, errors } = await newPage();
+  await withKey(page, 'bad');
+  await mockData(page);
+  await mockFinnhub(page, { invalid: true });
+  await page.goto(base);
+  await page.waitForSelector('.row[data-sym="AAPL"] .px b:text("190.00")');
+  await page.click('.tabbar a[data-tab="settings"]');
+  await page.click('#test-fh');
+  await page.waitForSelector('#fh-out:has-text("invalid API key")');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('finnhub: key is saved from Settings, used, and never exported', async () => {
+  const { ctx, page, errors } = await newPage({ acceptDownloads: true });
+  await mockData(page);
+  await mockFinnhub(page);
+  await page.goto(base + '#/settings');
+  await page.fill('#set-fh', 'secret-key');
+  await page.click('#test-fh');
+  await page.waitForSelector('#fh-out:has-text("Finnhub works")');
+  await page.click('.tabbar a[data-tab="watchlist"]');
+  await page.waitForSelector('.row[data-sym="AAPL"] .px b:text("191.11")');
+  await page.click('.tabbar a[data-tab="settings"]');
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#export')]);
+  const text = fs.readFileSync(await dl.path(), 'utf8');
+  assert.ok(!text.includes('secret-key'));
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 test('manifest and service worker are valid', async () => {
   const m = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.webmanifest'), 'utf8'));
   assert.equal(m.display, 'standalone');
@@ -347,7 +444,7 @@ test('manifest and service worker are valid', async () => {
   await mockData(page);
   await page.goto(base);
   await page.evaluate(() => navigator.serviceWorker.ready);
-  const cached = await page.evaluate(async () => (await (await caches.open('ziggy-v5')).keys()).length);
+  const cached = await page.evaluate(async () => (await (await caches.open('ziggy-v6')).keys()).length);
   assert.ok(cached >= shell.length, `cached ${cached}`);
   await ctx.close();
 });

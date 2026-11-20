@@ -31,6 +31,7 @@ export const DEFAULT_SETTINGS = {
   refresh: 60,          // seconds; 0 = manual
   proxy: 'auto',        // 'auto' | proxy id | 'custom'
   customProxy: '',      // template containing {url}
+  finnhubKey: '',       // optional; stays on this device
   lastGoodProxy: null,
 };
 
@@ -84,7 +85,7 @@ export const store = {
       watchlist: this.getWatchlist(),
       meta: this.getMeta(),
       alerts: this.getAlerts(),
-      settings: this.getSettings(),
+      settings: { ...this.getSettings(), finnhubKey: undefined }, // never export the key
     };
   },
 
@@ -95,7 +96,10 @@ export const store = {
     this.setWatchlist(data.watchlist.filter((s) => typeof s === 'string'));
     write('meta', data.meta && typeof data.meta === 'object' ? data.meta : {});
     write('alerts', Array.isArray(data.alerts) ? data.alerts : []);
-    if (data.settings) write('settings', { ...DEFAULT_SETTINGS, ...data.settings });
+    if (data.settings) {
+      const { finnhubKey } = this.getSettings(); // keep this device's key
+      write('settings', { ...DEFAULT_SETTINGS, ...data.settings, finnhubKey });
+    }
   },
 
   clearAll() {

@@ -12,6 +12,7 @@
 //  - Chart responses are cached in memory.
 
 import { store } from './store.js';
+import { hasFinnhub, toFinnhub, fhQuote, fhCandles, fhSearch } from './finnhub.js';
 
 export const PROXIES = [
   { id: 'allorigins', name: 'allorigins.win', tpl: 'https://api.allorigins.win/raw?url={url}' },
@@ -205,23 +206,49 @@ export async function getQuote(symbol) {
 
 let sparkWorks = true; // flips off for this session if Yahoo rejects batch requests
 
-/**
- * Quotes for many symbols, batched. Returns [{ok, value|error}] aligned with
- * `symbols`. Never rejects.
- */
-export async function getQuotes(symbols) {
+/** Yahoo batch (spark) for intraday series + quote. Missing symbols are omitted. */
+export async function getSpark(symbols) {
   const found = {};
-  if (sparkWorks && symbols.length > 1) {
-    const chunks = [];
-    for (let i = 0; i < symbols.length; i += BATCH_SIZE) chunks.push(symbols.slice(i, i + BATCH_SIZE));
-    const res = await Promise.all(chunks.map(async (chunk) => {
-      const url = `${YAHOO}/v7/finance/spark?symbols=${encodeURIComponent(chunk.join(','))}&range=1d&interval=5m&includePrePost=false${bust()}`;
-      try { return parseSpark(await fetchJSON(url)); } catch { return null; }
-    }));
-    res.forEach((r) => Object.assign(found, r || {}));
-    // Proxies answered but Yahoo gave nothing usable: stop trying batches.
-    if (res.every((r) => r && !Object.keys(r).length)) sparkWorks = false;
+  if (!sparkWorks || !symbols.length) return found;
+  const chunks = [];
+  for (let i = 0; i < symbols.length; i += BATCH_SIZE) chunks.push(symbols.slice(i, i + BATCH_SIZE));
+  const res = await Promise.all(chunks.map(async (chunk) => {
+    const url = `${YAHOO}/v7/finance/spark?symbols=${encodeURIComponent(chunk.join(','))}&range=1d&interval=5m&includePrePost=false${bust()}`;
+    try { return parseSpark(await fetchJSON(url)); } catch { return null; }
+  }));
+  res.forEach((r) => Object.assign(found, r || {}));
+  if (res.every((r) => r && !Object.keys(r).length)) sparkWorks = false;
+  return found;
+}
+
+/**
+ * Quotes for many symbols. Finnhub (when a key is set) answers first and is
+ * reported through onPartial; Yahoo covers everything else. Returns
+ * [{ok, value|error}] aligned with `symbols`; Finnhub values have series: null.
+ * Never rejects.
+ */
+export async function getQuotes(symbols, { onPartial } = {}) {
+  const found = {};
+  const fhSyms = hasFinnhub() ? symbols.filter((s) => toFinnhub(s)) : [];
+  if (fhSyms.length) {
+    const r = await mapLimit(fhSyms, 4, fhQuote);
+    fhSyms.forEach((s, i) => { if (r[i].ok) found[s] = { quote: r[i].value, series: null }; });
+    if (Object.keys(found).length) {
+      onPartial?.(symbols.map((s) => (found[s] ? { ok: true, value: found[s] } : null)));
+    }
   }
+  const rest = symbols.filter((s) => !found[s]);
+  const yahoo = await getYahooQuotes(rest);
+  rest.forEach((s, i) => { if (yahoo[i].ok) found[s] = yahoo[i].value; });
+  return symbols.map((s) => {
+    if (found[s]) return { ok: true, value: found[s] };
+    const j = rest.indexOf(s);
+    return { ok: false, error: yahoo[j]?.error || new Error(`No data for ${s}`) };
+  });
+}
+
+async function getYahooQuotes(symbols) {
+  const found = symbols.length > 1 ? await getSpark(symbols) : {};
   const missing = symbols.filter((s) => !found[s]);
   const single = await mapLimit(missing, 3, getQuote);
   missing.forEach((s, i) => { if (single[i].ok) found[s] = single[i].value; });
@@ -248,13 +275,39 @@ export function isChartFresh(symbol, rangeId) {
 export async function getChart(symbol, rangeId) {
   const r = RANGES.find((x) => x.id === rangeId) || RANGES[0];
   if (isChartFresh(symbol, r.id)) return peekChart(symbol, r.id).data;
-  const url = `${YAHOO}/v8/finance/chart/${encodeURIComponent(symbol)}?range=${r.range}&interval=${r.interval}&includePrePost=false${bust()}`;
-  const data = parseChart(await fetchJSON(url), symbol);
+  let data = null;
+  if (hasFinnhub() && toFinnhub(symbol)) {
+    try {
+      const [series, quote] = await Promise.all([fhCandles(symbol, r.id), fhQuote(symbol)]);
+      data = { quote, series };
+    } catch { /* fall back to Yahoo */ }
+  }
+  if (!data) {
+    const url = `${YAHOO}/v8/finance/chart/${encodeURIComponent(symbol)}?range=${r.range}&interval=${r.interval}&includePrePost=false${bust()}`;
+    data = parseChart(await fetchJSON(url), symbol);
+  }
   chartCache.set(`${symbol}|${r.id}`, { at: Date.now(), data });
   return data;
 }
 
-export async function search(q) {
+/**
+ * Search Finnhub (if keyed) and Yahoo in parallel. onUpdate(results) is called
+ * whenever more results arrive; resolves with the final merged list.
+ */
+export async function search(q, onUpdate) {
+  let merged = [];
+  const add = (items) => {
+    const seen = new Set(merged.map((x) => x.symbol));
+    merged = [...merged, ...items.filter((x) => !seen.has(x.symbol))];
+    onUpdate?.(merged);
+  };
+  const jobs = [yahooSearch(q).then(add, () => {})];
+  if (hasFinnhub()) jobs.unshift(fhSearch(q).then(add, () => {}));
+  await Promise.all(jobs);
+  return merged;
+}
+
+async function yahooSearch(q) {
   const url = `${YAHOO}/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=10&newsCount=0&listsCount=0`;
   const json = await fetchJSON(url);
   return (json?.quotes || [])

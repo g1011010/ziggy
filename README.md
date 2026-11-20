@@ -29,6 +29,17 @@ python3 -m http.server 8080
 
 ## Data source
 
+### Finnhub (recommended)
+
+Add a free key from [finnhub.io/register](https://finnhub.io/register) in **Settings → Finnhub**. This gets you:
+- **Fast prices:** US stocks and crypto load quickly and reliably straight from Finnhub, with no relay in between.
+- **Names and search:** company names and search results come from Finnhub too.
+- **Charts, if your plan allows:** charts use Finnhub when your plan includes candles, and fall back to Yahoo otherwise.
+
+The key is stored only on the device and is never included in backups. Indices (`^GSPC`), FX (`EURUSD=X`) and non-US listings (`VOD.L`) aren't on Finnhub's free plan, so they still come from Yahoo. Sparklines keep a live trail of Finnhub prices and are backfilled from Yahoo every few minutes.
+
+### Yahoo
+
 Quotes and charts come from Yahoo Finance's unofficial `v8/finance/chart` and `v1/finance/search` endpoints. Yahoo doesn't send CORS headers, so requests go through a public CORS proxy. The app uses allorigins.win and codetabs.com, and remembers whichever one last worked. (corsproxy.io now requires an API key, so it was removed.)
 
 Public proxies can be slow or disappear. You can enter your own proxy in **Settings → Data source → Custom** as a URL template containing `{url}`, for example a Cloudflare Worker at `https://my-proxy.workers.dev/?url={url}`.

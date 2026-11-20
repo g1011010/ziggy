@@ -78,4 +78,39 @@ async function mockData(page, opts = {}) {
   return calls;
 }
 
-module.exports = { PRICES, chart, mockData };
+// Finnhub mock. Prices differ slightly from the Yahoo fixtures so tests can
+// tell which source a number came from.
+const FH = { AAPL: [191.11, 187.5], MSFT: [421.11, 425], NVDA: [146.11, 141], GOOGL: [179.11, 176.2], ANT: [98.11, 83], TSLA: [251.11, 240],
+  'BINANCE:BTCUSDT': [97111, 95000], 'BINANCE:ETHUSDT': [3411, 3350] };
+
+async function mockFinnhub(page, opts = {}) {
+  const calls = [];
+  await page.route(/finnhub\.io/, (route) => {
+    const u = new URL(route.request().url());
+    calls.push(u.pathname + '?' + u.searchParams.get('symbol'));
+    const json = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(body) });
+    if (opts.invalid) return json({ error: 'Invalid API key' }, 401);
+    const sym = u.searchParams.get('symbol');
+    if (u.pathname.endsWith('/quote')) {
+      const p = FH[sym];
+      if (!p) return json({ c: 0, d: null, dp: null, h: 0, l: 0, o: 0, pc: 0, t: 0 });
+      const [c, pc] = p;
+      return json({ c, d: c - pc, dp: ((c - pc) / pc) * 100, h: c * 1.01, l: pc * 0.99, o: pc, pc, t: Math.floor(Date.now() / 1000) });
+    }
+    if (u.pathname.endsWith('/stock/profile2')) return json(FH[sym] ? { name: `${sym} Finnhub Inc` } : {});
+    if (u.pathname.endsWith('/candle')) {
+      if (opts.candles !== 'ok') return json({ error: "You don't have access to this resource." }, 403);
+      const now = Math.floor(Date.now() / 1000);
+      const t = Array.from({ length: 50 }, (_, i) => now - (49 - i) * 300);
+      return json({ s: 'ok', t, c: t.map((_, i) => 180 + i * 0.2), o: [], h: [], l: [], v: [] });
+    }
+    if (u.pathname.endsWith('/search')) {
+      const q = u.searchParams.get('q').toUpperCase();
+      return json({ count: 1, result: Object.keys(FH).filter((k) => !k.includes(':') && k.includes(q)).map((k) => ({ description: `${k} FINNHUB INC`, displaySymbol: k, symbol: k, type: 'Common Stock' })) });
+    }
+    return json({}, 404);
+  });
+  return calls;
+}
+
+module.exports = { PRICES, chart, mockData, mockFinnhub };

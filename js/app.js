@@ -1,5 +1,6 @@
 import { store } from './store.js';
-import { getQuote, getQuotes, getChart, peekChart, isChartFresh, search, fetchJSON, PROXIES, RANGES } from './api.js';
+import { getQuotes, getSpark, getChart, peekChart, isChartFresh, search, fetchJSON, PROXIES, RANGES } from './api.js';
+import { hasFinnhub, toFinnhub, fhName, fhTest } from './finnhub.js';
 import { evaluate, newAlert, notify, notificationState, requestNotifications } from './alerts.js';
 import { sparkline, detailChart } from './chart.js';
 import { esc, fmtPrice, fmtChange, fmtPct, fmtTime, fmtDateTime, isMarketOpen } from './format.js';
@@ -78,26 +79,34 @@ async function refresh({ manual = false } = {}) {
   setRefreshSpinner(true);
 
   const symbols = trackedSymbols();
-  const results = await getQuotes(symbols);
   const prices = {};
   let okCount = 0;
   let firstErr = null;
-
-  results.forEach((r, i) => {
-    const sym = symbols[i];
+  const applied = new Set();
+  const apply = (r, sym) => {
+    if (!r || applied.has(sym)) return;
     if (r.ok) {
+      applied.add(sym);
       okCount++;
-      // Batched responses can be leaner (no name, ranges…): keep earlier details.
-      const entry = { quote: mergeQuote(state.quotes[sym]?.quote, r.value.quote), series: r.value.series, ts: Date.now() };
-      state.quotes[sym] = { ...entry, stale: false };
-      store.setCached(sym, entry);
-      if (r.value.quote.name) store.setMeta(sym, { name: r.value.quote.name });
+      applyQuote(sym, r.value);
       prices[sym] = r.value.quote.price;
     } else {
       firstErr = firstErr || r.error;
       if (state.quotes[sym]) state.quotes[sym].stale = true;
     }
+  };
+
+  const results = await getQuotes(symbols, {
+    // Finnhub answers first: show those prices right away.
+    onPartial: (partial) => {
+      partial.forEach((r, i) => apply(r, symbols[i]));
+      state.lastUpdated = Date.now();
+      renderStatus();
+      rerenderCurrent();
+    },
   });
+  results.forEach((r, i) => apply(r, symbols[i]));
+  backfillFinnhub(symbols);
 
   if (okCount) state.lastUpdated = Date.now();
   state.lastError = symbols.length && !okCount ? firstErr : null;
@@ -120,6 +129,67 @@ async function refresh({ manual = false } = {}) {
     else if (okCount < symbols.length) toast('Partly updated', `${okCount} of ${symbols.length} symbols updated.`);
     else toast('Prices updated', `${okCount} symbols · ${fmtTime(state.lastUpdated)}`);
   }
+}
+
+/**
+ * Store a fresh quote. Finnhub quotes come without an intraday series, so the
+ * sparkline is kept going by appending each new price to today's trail.
+ */
+function applyQuote(sym, value) {
+  const prev = state.quotes[sym];
+  let series = value.series;
+  if (!series) {
+    const now = Math.floor(Date.now() / 1000);
+    const old = prev?.series;
+    const fresh = old?.t?.length && now - old.t[old.t.length - 1] < 12 * 3600;
+    const base = fresh ? old : { t: [], v: [] };
+    series = { t: [...base.t, now].slice(-400), v: [...base.v, value.quote.price].slice(-400) };
+  }
+  // Leaner responses (batch / Finnhub) must not wipe earlier details like names.
+  const entry = { quote: mergeQuote(prev?.quote, value.quote), series, ts: Date.now() };
+  state.quotes[sym] = { ...entry, stale: false };
+  store.setCached(sym, entry);
+  if (value.quote.name) store.setMeta(sym, { name: value.quote.name });
+}
+
+let lastBackfill = 0;
+const nameTried = new Set();
+
+/**
+ * For Finnhub-priced symbols: fetch company names once, and every few minutes
+ * pull Yahoo's intraday series in the background so sparklines show the whole
+ * day. Never blocks the refresh.
+ */
+function backfillFinnhub(symbols) {
+  if (!hasFinnhub()) return;
+  const fh = symbols.filter((s) => toFinnhub(s));
+  for (const s of fh) {
+    if (store.getMeta()[s]?.name || nameTried.has(s)) continue;
+    nameTried.add(s);
+    fhName(s).then((name) => {
+      if (!name) return;
+      store.setMeta(s, { name });
+      if (state.quotes[s]) state.quotes[s].quote = { ...state.quotes[s].quote, name };
+      rerenderCurrent();
+    }).catch(() => {});
+  }
+  if (Date.now() - lastBackfill < 5 * 60e3) return;
+  lastBackfill = Date.now();
+  getSpark(fh).then((found) => {
+    for (const [s, y] of Object.entries(found)) {
+      const cur = state.quotes[s];
+      if (!cur) continue;
+      // Keep the live Finnhub price; take Yahoo's series and extra details.
+      const quote = mergeQuote(y.quote, cur.quote);
+      const series = { t: [...y.series.t], v: [...y.series.v] };
+      const last = series.t[series.t.length - 1];
+      if (cur.ts / 1000 > last) { series.t.push(Math.floor(cur.ts / 1000)); series.v.push(cur.quote.price); }
+      const entry = { quote, series, ts: cur.ts };
+      state.quotes[s] = { ...entry, stale: cur.stale };
+      store.setCached(s, entry);
+    }
+    if (Object.keys(found).length) rerenderCurrent();
+  }).catch(() => {});
 }
 
 function mergeQuote(prev, next) {
@@ -273,12 +343,12 @@ function addSymbol(sym, info = {}) {
   }
   store.setWatchlist([...list, sym]);
   if (info.name) store.setMeta(sym, { name: info.name });
-  getQuote(sym).then((r) => {
-    const entry = { quote: r.quote, series: r.series, ts: Date.now() };
-    state.quotes[sym] = { ...entry, stale: false };
-    store.setCached(sym, entry);
+  getQuotes([sym]).then(([r]) => {
+    if (!r.ok) return;
+    applyQuote(sym, r.value);
+    backfillFinnhub([sym]);
     rerenderCurrent();
-  }).catch(() => {});
+  });
   return true;
 }
 
@@ -459,7 +529,7 @@ function openSearch() {
     timer = setTimeout(async () => {
       const my = ++seq;
       try {
-        const items = await search(q);
+        const items = await search(q, (partial) => { if (my === seq) draw(partial, q); });
         if (my === seq) draw(items, q);
       } catch {
         if (my === seq) draw([], q);
@@ -847,7 +917,17 @@ function renderSettings() {
       </label>
     </div>
 
-    <h3 class="section-title">Data source</h3>
+    <h3 class="section-title">Finnhub (fast prices)</h3>
+    <div class="card">
+      <label class="field"><span>API key</span>
+        <input class="input" id="set-fh" type="password" value="${esc(s.finnhubKey || '')}" placeholder="Paste your free Finnhub key" spellcheck="false" autocapitalize="off" autocomplete="off">
+      </label>
+      <div class="btn-row"><button class="btn" id="test-fh">Save &amp; test</button></div>
+      <p class="notice" id="fh-out" style="margin-top:10px">${s.finnhubKey ? 'Key saved on this device.' : ''}</p>
+      <p class="notice">With a key, US stocks and crypto load fast and reliably from Finnhub. Indices, FX and non-US listings still use Yahoo below. Get a free key at <a href="https://finnhub.io/register" target="_blank" rel="noopener">finnhub.io/register</a>. It’s stored only on this device and left out of backups.</p>
+    </div>
+
+    <h3 class="section-title">Yahoo data source</h3>
     <div class="card">
       <label class="field"><span>CORS proxy</span>
         <select class="input" id="set-proxy">
@@ -879,9 +959,25 @@ function renderSettings() {
       <button class="btn danger block" id="clear">Clear all data</button>
     </div>
 
-    <p class="disclaimer">Ziggy v1 · Market data may be delayed 15+ minutes and is not investment advice.<br>Charts by uPlot (MIT).</p>`;
+    <p class="disclaimer">Ziggy v1.1 · Market data may be delayed and is not investment advice.<br>Charts by uPlot (MIT).</p>`;
 
   $('#set-refresh').onchange = (e) => { store.setSettings({ refresh: +e.target.value }); scheduleNext(); };
+  $('#set-fh').onchange = (e) => { store.setSettings({ finnhubKey: e.target.value.trim() }); };
+  $('#test-fh').onclick = async () => {
+    const key = $('#set-fh').value.trim();
+    store.setSettings({ finnhubKey: key });
+    const out = $('#fh-out');
+    if (!key) { out.textContent = 'Key removed — using Yahoo only.'; return; }
+    out.textContent = 'Testing…';
+    const t0 = performance.now();
+    try {
+      const p = await fhTest();
+      out.innerHTML = `✅ Finnhub works — AAPL ${fmtPrice(p)} (${Math.round(performance.now() - t0)} ms)`;
+      refresh();
+    } catch (e) {
+      out.textContent = `❌ ${e.message}`;
+    }
+  };
   $('#set-proxy').onchange = (e) => {
     store.setSettings({ proxy: e.target.value });
     $('#custom-wrap').hidden = e.target.value !== 'custom';
