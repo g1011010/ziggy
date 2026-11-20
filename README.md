@@ -29,7 +29,7 @@ python3 -m http.server 8080
 
 ## Data source
 
-Quotes and charts come from Yahoo Finance's unofficial `v8/finance/chart` and `v1/finance/search` endpoints. Yahoo doesn't send CORS headers, so requests go through a public CORS proxy. The app tries corsproxy.io, then allorigins.win, then codetabs.com, and remembers whichever one last worked.
+Quotes and charts come from Yahoo Finance's unofficial `v8/finance/chart` and `v1/finance/search` endpoints. Yahoo doesn't send CORS headers, so requests go through a public CORS proxy. The app uses allorigins.win and codetabs.com, and remembers whichever one last worked. (corsproxy.io now requires an API key, so it was removed.)
 
 Public proxies can be slow or disappear. You can enter your own proxy in **Settings → Data source → Custom** as a URL template containing `{url}`, for example a Cloudflare Worker at `https://my-proxy.workers.dev/?url={url}`.
 

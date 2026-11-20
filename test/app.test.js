@@ -138,12 +138,12 @@ test('price alert fires on refresh, then shows as triggered', async () => {
 
 test('falls back to the next proxy and remembers it', async () => {
   const { ctx, page, errors } = await newPage();
-  const calls = await mockData(page, { failProxies: ['corsproxy.io'] });
+  const calls = await mockData(page, { failProxies: ['api.allorigins.win'] });
   await page.goto(base);
   await page.waitForSelector('.row[data-sym="AAPL"] .px b:text("190.00")');
   const s = await page.evaluate(() => JSON.parse(localStorage.getItem('ziggy:settings')));
-  assert.equal(s.lastGoodProxy, 'allorigins');
-  assert.ok(calls.includes('corsproxy.io') && calls.includes('api.allorigins.win'));
+  assert.equal(s.lastGoodProxy, 'codetabs');
+  assert.ok(calls.includes('api.allorigins.win') && calls.includes('api.codetabs.com'));
   assert.deepEqual(errors, []);
   await ctx.close();
 });
@@ -269,7 +269,7 @@ test('manual refresh fetches fresh data, reports it, and survives a stalled prox
 test('requests carry a cache-busting parameter', async () => {
   const { ctx, page } = await newPage();
   const urls = [];
-  page.on('request', (r) => { if (r.url().includes('corsproxy')) urls.push(new URL(new URL(r.url()).searchParams.get('url'))); });
+  page.on('request', (r) => { if (r.url().includes('allorigins')) urls.push(new URL(new URL(r.url()).searchParams.get('url'))); });
   await mockData(page);
   await page.goto(base);
   await page.waitForSelector('.row[data-sym="AAPL"] .px b:text("190.00")');
@@ -309,7 +309,7 @@ test('falls back to per-symbol requests when batching is rejected', async () => 
 
 test('a stalled proxy is overtaken by the next one within seconds', async () => {
   const { ctx, page, errors } = await newPage();
-  await mockData(page, { stallProxies: ['corsproxy.io'] });
+  await mockData(page, { stallProxies: ['api.allorigins.win'] });
   const t0 = Date.now();
   await page.goto(base);
   await page.waitForSelector('.row[data-sym="AAPL"] .px b:text("190.00")');
@@ -347,7 +347,7 @@ test('manifest and service worker are valid', async () => {
   await mockData(page);
   await page.goto(base);
   await page.evaluate(() => navigator.serviceWorker.ready);
-  const cached = await page.evaluate(async () => (await (await caches.open('ziggy-v4')).keys()).length);
+  const cached = await page.evaluate(async () => (await (await caches.open('ziggy-v5')).keys()).length);
   assert.ok(cached >= shell.length, `cached ${cached}`);
   await ctx.close();
 });

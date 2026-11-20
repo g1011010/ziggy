@@ -14,7 +14,6 @@
 import { store } from './store.js';
 
 export const PROXIES = [
-  { id: 'corsproxy', name: 'corsproxy.io', tpl: 'https://corsproxy.io/?url={url}' },
   { id: 'allorigins', name: 'allorigins.win', tpl: 'https://api.allorigins.win/raw?url={url}' },
   { id: 'codetabs', name: 'codetabs.com', tpl: 'https://api.codetabs.com/v1/proxy?quest={url}' },
 ];
@@ -33,6 +32,8 @@ export const RANGES = [
   { id: '1Y', range: '1y', interval: '1d', ttl: 30 * 60e3 },
   { id: '5Y', range: '5y', interval: '1wk', ttl: 60 * 60e3 },
 ];
+
+// corsproxy.io was removed: since late 2026 it rejects keyless requests (401).
 
 // ---------- Proxy selection ----------
 
