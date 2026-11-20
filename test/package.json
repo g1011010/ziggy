@@ -1,0 +1,10 @@
+{
+  "name": "ziggy-tests",
+  "private": true,
+  "scripts": {
+    "test": "node --test --test-concurrency=1"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.0"
+  }
+}
