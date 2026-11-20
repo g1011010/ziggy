@@ -33,7 +33,14 @@ function init() {
   setupPullToRefresh();
 
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register('sw.js').then((reg) => {
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update().catch(() => {}); });
+    }).catch(() => {});
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (hadController && !reloaded) { reloaded = true; location.reload(); }
+    });
   }
 
   route();
@@ -61,8 +68,11 @@ function trackedSymbols() {
   return [...new Set([...store.getWatchlist(), ...alertSyms])];
 }
 
-async function refresh() {
-  if (state.refreshing) return;
+async function refresh({ manual = false } = {}) {
+  if (state.refreshing) {
+    if (manual) toast('Refreshing…', 'Still waiting on the data source.');
+    return;
+  }
   state.refreshing = true;
   renderStatus();
   setRefreshSpinner(true);
@@ -102,6 +112,13 @@ async function refresh() {
   renderStatus();
   rerenderCurrent();
   scheduleNext();
+
+  if (manual) {
+    if (!symbols.length) toast('Nothing to refresh', 'Add a symbol first.');
+    else if (!okCount) toast('Refresh failed', `${firstErr?.message || 'No data'}. Try another proxy in Settings.`, 'error', 5000);
+    else if (okCount < symbols.length) toast('Partly updated', `${okCount} of ${symbols.length} symbols updated.`);
+    else toast('Prices updated', `${okCount} symbols · ${fmtTime(state.lastUpdated)}`);
+  }
 }
 
 function setRefreshSpinner(on) {
@@ -212,7 +229,7 @@ function renderWatchlist() {
     <button class="icon-btn${state.refreshing ? ' spinning' : ''}" id="refresh-btn" aria-label="Refresh">${ICON_REFRESH}</button>
     <button class="icon-btn" id="add-btn" aria-label="Add symbol">${ICON_PLUS}</button>`);
   $('#edit-btn').onclick = () => { state.editing = !state.editing; renderWatchlist(); };
-  $('#refresh-btn').onclick = () => refresh();
+  $('#refresh-btn').onclick = () => refresh({ manual: true });
   $('#add-btn').onclick = openSearch;
 
   const view = $('#view');
@@ -383,7 +400,7 @@ function setupPullToRefresh() {
     if (pulling && dist >= THRESHOLD) {
       ptr.classList.add('loading');
       ptr.style.transform = 'translateY(16px)';
-      refresh();
+      refresh({ manual: true });
     } else {
       ptr.style.opacity = 0; ptr.style.transform = '';
     }

@@ -11,7 +11,7 @@ export const PROXIES = [
 ];
 
 const YAHOO = 'https://query1.finance.yahoo.com';
-const TIMEOUT_MS = 12000;
+const TIMEOUT_MS = 10000;
 
 export const RANGES = [
   { id: '1D', range: '1d', interval: '5m' },
@@ -35,22 +35,27 @@ function proxyOrder() {
   return last ? [last, ...PROXIES.filter((x) => x !== last)] : [...PROXIES];
 }
 
-async function fetchWithTimeout(url) {
+// The timeout covers the whole exchange, including reading the body: a proxy
+// that sends headers and then stalls must not hang a refresh forever.
+async function fetchText(url) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
-    return await fetch(url, { signal: ctrl.signal, cache: 'no-store' });
+    const res = await fetch(url, { signal: ctrl.signal, cache: 'no-store' });
+    return { res, text: await res.text() };
   } finally {
     clearTimeout(t);
   }
 }
 
+// Unique query param per request so caching proxies always fetch fresh data.
+const bust = () => `&_=${Date.now()}`;
+
 export async function fetchJSON(target) {
   let lastErr;
   for (const p of proxyOrder()) {
     try {
-      const res = await fetchWithTimeout(p.tpl.replace('{url}', encodeURIComponent(target)));
-      const text = await res.text();
+      const { res, text } = await fetchText(p.tpl.replace('{url}', encodeURIComponent(target)));
       let json;
       try { json = JSON.parse(text); } catch { throw new Error(`${p.name}: not JSON (HTTP ${res.status})`); }
       // Yahoo returns JSON error bodies with 4xx (e.g. unknown symbol) — those are real answers.
@@ -106,13 +111,13 @@ function parseChart(json, symbol) {
 
 /** Quote plus intraday series (used for the watchlist sparkline). */
 export async function getQuote(symbol) {
-  const url = `${YAHOO}/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=5m&includePrePost=false`;
+  const url = `${YAHOO}/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=5m&includePrePost=false${bust()}`;
   return parseChart(await fetchJSON(url), symbol);
 }
 
 export async function getChart(symbol, rangeId) {
   const r = RANGES.find((x) => x.id === rangeId) || RANGES[0];
-  const url = `${YAHOO}/v8/finance/chart/${encodeURIComponent(symbol)}?range=${r.range}&interval=${r.interval}&includePrePost=false`;
+  const url = `${YAHOO}/v8/finance/chart/${encodeURIComponent(symbol)}?range=${r.range}&interval=${r.interval}&includePrePost=false${bust()}`;
   return parseChart(await fetchJSON(url), symbol);
 }
 

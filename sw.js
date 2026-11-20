@@ -1,8 +1,9 @@
-// Service worker: cache-first app shell so Ziggy opens offline.
+// Service worker: network-first app shell (fresh code when online),
+// falling back to the cache so Ziggy still opens offline.
 // Market data (cross-origin) always goes to the network; the app keeps its
 // own last-known prices for offline display.
 
-const VERSION = 'ziggy-v2';
+const VERSION = 'ziggy-v3';
 const SHELL = [
   './',
   'index.html',
@@ -52,18 +53,17 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // Static assets: cache first, refresh in the background.
+  // App files: network first (bypassing the HTTP cache), cache as fallback.
   e.respondWith(
-    caches.match(e.request).then((hit) => {
-      const net = fetch(e.request).then((res) => {
+    fetch(e.request, { cache: 'no-cache' })
+      .then((res) => {
         if (res.ok) {
           const copy = res.clone();
           caches.open(VERSION).then((c) => c.put(e.request, copy));
         }
         return res;
-      });
-      return hit || net;
-    }),
+      })
+      .catch(() => caches.match(e.request).then((hit) => hit || Response.error())),
   );
 });
 

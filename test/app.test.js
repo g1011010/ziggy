@@ -47,7 +47,7 @@ test('watchlist loads default symbols with prices', async () => {
   await page.goto(base);
   await page.waitForSelector('.row[data-sym="AAPL"] .px b:text("190.00")');
   const syms = await page.$$eval('.row', (rs) => rs.map((r) => r.dataset.sym));
-  assert.deepEqual(syms, ['^GSPC', '^IXIC', 'AAPL', 'MSFT', 'NVDA', 'GOOGL', 'EURUSD=X', 'BTC-USD', 'ETH-USD']);
+  assert.deepEqual(syms, ['^GSPC', '^IXIC', 'AAPL', 'MSFT', 'NVDA', 'GOOGL', 'ANT', 'EURUSD=X', 'BTC-USD', 'ETH-USD']);
   assert.match(await page.textContent('.row[data-sym="AAPL"] .chg'), /\+1\.33%/);
   assert.ok(await page.$('.row[data-sym="MSFT"] .chg.down'));
   assert.equal(await page.textContent('.row[data-sym="EURUSD=X"] .px b'), '1.0832');
@@ -72,7 +72,7 @@ test('search adds a symbol and it persists across reload', async () => {
   await page.waitForSelector('.row[data-sym="VOD.L"] .px b:text("72.40")');
   await page.reload();
   await page.waitForSelector('.row[data-sym="VOD.L"]');
-  assert.equal((await page.$$('.row')).length, 10);
+  assert.equal((await page.$$('.row')).length, 11);
   assert.deepEqual(errors, []);
   await ctx.close();
 });
@@ -186,7 +186,7 @@ test('swipe left reveals delete; edit mode reorders and removes', async () => {
   await page.mouse.move(h.x + h.width / 2, target.y + target.height * 0.9, { steps: 12 });
   await page.mouse.up();
   const order = await page.evaluate(() => JSON.parse(localStorage.getItem('ziggy:watchlist')));
-  assert.deepEqual(order, ['^IXIC', 'AAPL', '^GSPC', 'NVDA', 'GOOGL', 'EURUSD=X', 'BTC-USD', 'ETH-USD']);
+  assert.deepEqual(order, ['^IXIC', 'AAPL', '^GSPC', 'NVDA', 'GOOGL', 'ANT', 'EURUSD=X', 'BTC-USD', 'ETH-USD']);
   await page.click('.row[data-sym="BTC-USD"] .rm');
   await page.waitForFunction(() => !document.querySelector('.row[data-sym="BTC-USD"]'));
   assert.deepEqual(errors, []);
@@ -200,7 +200,7 @@ test('settings: export/import round-trip and unknown symbol handling', async () 
   const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#export')]);
   const data = JSON.parse(fs.readFileSync(await dl.path(), 'utf8'));
   assert.equal(data.app, 'ziggy');
-  assert.equal(data.watchlist.length, 9);
+  assert.equal(data.watchlist.length, 10);
   data.watchlist = ['AAPL', 'NOPE123'];
   const tmp = path.join(require('node:os').tmpdir(), `ziggy-import-${Date.now()}.json`);
   fs.writeFileSync(tmp, JSON.stringify(data));
@@ -226,7 +226,7 @@ test('existing saved watchlists get new symbols merged in once', async () => {
   await page.goto(base);
   await page.waitForSelector('.row[data-sym="ETH-USD"]');
   let syms = await page.$$eval('.row', (rs) => rs.map((r) => r.dataset.sym));
-  assert.deepEqual(syms, ['TSLA', 'AAPL', 'NVDA', 'GOOGL', 'BTC-USD', 'ETH-USD', '^IXIC']);
+  assert.deepEqual(syms, ['TSLA', 'AAPL', 'NVDA', 'GOOGL', 'BTC-USD', 'ETH-USD', '^IXIC', 'ANT']);
   // A removed symbol does not come back.
   await page.click('#edit-btn');
   await page.click('.row[data-sym="NVDA"] .rm');
@@ -235,6 +235,45 @@ test('existing saved watchlists get new symbols merged in once', async () => {
   syms = await page.$$eval('.row', (rs) => rs.map((r) => r.dataset.sym));
   assert.ok(!syms.includes('NVDA'));
   assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('manual refresh fetches fresh data, reports it, and survives a stalled proxy', async () => {
+  const { ctx, page, errors } = await newPage();
+  const prices = { AAPL: [190, 187.5] };
+  await mockData(page, { prices });
+  await page.goto(base);
+  await page.waitForSelector('.row[data-sym="AAPL"] .px b:text("190.00")');
+  prices.AAPL = [191.25, 187.5];
+  await page.click('#refresh-btn');
+  await page.waitForSelector('.row[data-sym="AAPL"] .px b:text("191.25")');
+  await page.waitForSelector('.toast:has-text("Prices updated")');
+
+  // A proxy that sends headers then never finishes the body must time out, not hang.
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+  await page.route(/corsproxy\.io|allorigins\.win|codetabs\.com/, () => { /* never fulfilled */ });
+  await page.click('#refresh-btn');
+  await page.waitForSelector('#refresh-btn.spinning');
+  await page.click('#refresh-btn');
+  await page.waitForSelector('.toast:has-text("Refreshing")');
+  await page.waitForSelector('.toast:has-text("Refresh failed")', { timeout: 120000 });
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+  prices.AAPL = [192.5, 187.5];
+  await mockData(page, { prices });
+  await page.click('#refresh-btn');
+  await page.waitForSelector('.row[data-sym="AAPL"] .px b:text("192.50")');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('requests carry a cache-busting parameter', async () => {
+  const { ctx, page } = await newPage();
+  const urls = [];
+  page.on('request', (r) => { if (r.url().includes('corsproxy')) urls.push(new URL(new URL(r.url()).searchParams.get('url'))); });
+  await mockData(page);
+  await page.goto(base);
+  await page.waitForSelector('.row[data-sym="AAPL"] .px b:text("190.00")');
+  assert.ok(urls.length && urls.every((u) => u.searchParams.has('_')));
   await ctx.close();
 });
 
@@ -252,7 +291,7 @@ test('manifest and service worker are valid', async () => {
   await mockData(page);
   await page.goto(base);
   await page.evaluate(() => navigator.serviceWorker.ready);
-  const cached = await page.evaluate(async () => (await (await caches.open('ziggy-v2')).keys()).length);
+  const cached = await page.evaluate(async () => (await (await caches.open('ziggy-v3')).keys()).length);
   assert.ok(cached >= shell.length, `cached ${cached}`);
   await ctx.close();
 });

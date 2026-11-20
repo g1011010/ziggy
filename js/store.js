@@ -18,12 +18,13 @@ function write(key, value) {
   try { localStorage.setItem(PREFIX + key, JSON.stringify(value)); } catch { /* memory only */ }
 }
 
-export const DEFAULT_WATCHLIST = ['^GSPC', '^IXIC', 'AAPL', 'MSFT', 'NVDA', 'GOOGL', 'EURUSD=X', 'BTC-USD', 'ETH-USD'];
+export const DEFAULT_WATCHLIST = ['^GSPC', '^IXIC', 'AAPL', 'MSFT', 'NVDA', 'GOOGL', 'ANT', 'EURUSD=X', 'BTC-USD', 'ETH-USD'];
 
 // One-time additions merged into existing saved watchlists. Each batch runs
 // once per device, so anything the user later removes stays removed.
 const SEED_BATCHES = [
   ['NVDA', 'GOOGL', 'AAPL', 'BTC-USD', 'ETH-USD', '^IXIC'],
+  ['ANT'],
 ];
 
 export const DEFAULT_SETTINGS = {
