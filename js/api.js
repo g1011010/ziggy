@@ -15,6 +15,8 @@ import { store } from './store.js';
 import { hasFinnhub, toFinnhub, fhQuote, fhCandles, fhSearch } from './finnhub.js';
 
 export const PROXIES = [
+  // Ziggy's own Cloudflare Worker (worker/proxy.js): fast, Yahoo-only.
+  { id: 'ziggy', name: 'Ziggy relay', tpl: 'https://ziggy.g1011010.workers.dev/?url={url}' },
   { id: 'allorigins', name: 'allorigins.win', tpl: 'https://api.allorigins.win/raw?url={url}' },
   { id: 'codetabs', name: 'codetabs.com', tpl: 'https://api.codetabs.com/v1/proxy?quest={url}' },
 ];
@@ -53,6 +55,7 @@ function proxyOrder() {
   const now = Date.now();
   const score = (p) =>
     (health[p.id]?.benchUntil > now ? 1e6 : 0) +
+    (p.id === 'ziggy' ? -2000 : 0) + // own relay first unless it's failing
     (p.id === s.lastGoodProxy ? 0 : 1000) +
     (health[p.id]?.ms ?? 5000) / 10;
   return [...PROXIES].sort((a, b) => score(a) - score(b));

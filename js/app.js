@@ -580,7 +580,7 @@ function openDetail(symbol) {
       <button class="btn primary" id="d-alert">🔔 Set alert</button>
       <button class="btn" id="d-watch">${inList ? 'Remove' : '+ Watchlist'}</button>
     </div>
-    <p class="disclaimer">Data from Yahoo Finance via a public proxy. Often delayed — not for trading decisions.</p>`;
+    <p class="disclaimer">Prices from Finnhub &amp; Yahoo Finance. May be delayed — not for trading decisions.</p>`;
 
   $('#d-back').onclick = () => {
     // Go back if we got here from inside the app; otherwise (deep link) go home.

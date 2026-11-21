@@ -138,12 +138,12 @@ test('price alert fires on refresh, then shows as triggered', async () => {
 
 test('falls back to the next proxy and remembers it', async () => {
   const { ctx, page, errors } = await newPage();
-  const calls = await mockData(page, { failProxies: ['api.allorigins.win'] });
+  const calls = await mockData(page, { failProxies: ['ziggy.g1011010.workers.dev'] });
   await page.goto(base);
   await page.waitForSelector('.row[data-sym="AAPL"] .px b:text("190.00")');
   const s = await page.evaluate(() => JSON.parse(localStorage.getItem('ziggy:settings')));
-  assert.equal(s.lastGoodProxy, 'codetabs');
-  assert.ok(calls.includes('api.allorigins.win') && calls.includes('api.codetabs.com'));
+  assert.equal(s.lastGoodProxy, 'allorigins');
+  assert.ok(calls.includes('ziggy.g1011010.workers.dev') && calls.includes('api.allorigins.win'));
   assert.deepEqual(errors, []);
   await ctx.close();
 });
@@ -251,7 +251,7 @@ test('manual refresh fetches fresh data, reports it, and survives a stalled prox
 
   // A proxy that sends headers then never finishes the body must time out, not hang.
   await page.unrouteAll({ behavior: 'ignoreErrors' });
-  await page.route(/corsproxy\.io|allorigins\.win|codetabs\.com/, () => { /* never fulfilled */ });
+  await page.route(/workers\.dev|corsproxy\.io|allorigins\.win|codetabs\.com/, () => { /* never fulfilled */ });
   await page.click('#refresh-btn');
   await page.waitForSelector('#refresh-btn.spinning');
   await page.click('#refresh-btn');
@@ -269,7 +269,7 @@ test('manual refresh fetches fresh data, reports it, and survives a stalled prox
 test('requests carry a cache-busting parameter', async () => {
   const { ctx, page } = await newPage();
   const urls = [];
-  page.on('request', (r) => { if (r.url().includes('allorigins')) urls.push(new URL(new URL(r.url()).searchParams.get('url'))); });
+  page.on('request', (r) => { if (r.url().includes('workers.dev')) urls.push(new URL(new URL(r.url()).searchParams.get('url'))); });
   await mockData(page);
   await page.goto(base);
   await page.waitForSelector('.row[data-sym="AAPL"] .px b:text("190.00")');
@@ -309,7 +309,7 @@ test('falls back to per-symbol requests when batching is rejected', async () => 
 
 test('a stalled proxy is overtaken by the next one within seconds', async () => {
   const { ctx, page, errors } = await newPage();
-  await mockData(page, { stallProxies: ['api.allorigins.win'] });
+  await mockData(page, { stallProxies: ['ziggy.g1011010.workers.dev'] });
   const t0 = Date.now();
   await page.goto(base);
   await page.waitForSelector('.row[data-sym="AAPL"] .px b:text("190.00")');
@@ -325,7 +325,7 @@ test('1D chart appears instantly from watchlist data even if the network stalls'
   await page.goto(base);
   await page.waitForSelector('.row[data-sym="AAPL"] .px b:text("190.00")');
   await page.unrouteAll({ behavior: 'ignoreErrors' });
-  await page.route(/corsproxy\.io|allorigins\.win|codetabs\.com/, () => { /* never answers */ });
+  await page.route(/workers\.dev|corsproxy\.io|allorigins\.win|codetabs\.com/, () => { /* never answers */ });
   await page.click('.row[data-sym="AAPL"] .sym');
   await page.waitForSelector('#d-chart canvas', { timeout: 1500 });
   assert.ok(await page.$eval('#d-msg', (m) => m.hidden));
@@ -430,6 +430,17 @@ test('finnhub: key is saved from Settings, used, and never exported', async () =
   await ctx.close();
 });
 
+test('own relay is preferred even if another proxy worked last time', async () => {
+  const { ctx, page, errors } = await newPage();
+  await page.addInitScript(() => { if (!sessionStorage.s) { sessionStorage.s = 1; localStorage.setItem('ziggy:settings', JSON.stringify({ lastGoodProxy: 'allorigins' })); } });
+  const calls = await mockData(page);
+  await page.goto(base);
+  await page.waitForSelector('.row[data-sym="AAPL"] .px b:text("190.00")');
+  assert.ok(calls.length && calls.every((h) => h === 'ziggy.g1011010.workers.dev'), calls.join(','));
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 test('own relay: bare address is accepted and used exclusively', async () => {
   const { ctx, page, errors } = await newPage();
   const calls = await mockData(page);
@@ -467,7 +478,7 @@ test('manifest and service worker are valid', async () => {
   await mockData(page);
   await page.goto(base);
   await page.evaluate(() => navigator.serviceWorker.ready);
-  const cached = await page.evaluate(async () => (await (await caches.open('ziggy-v7')).keys()).length);
+  const cached = await page.evaluate(async () => (await (await caches.open('ziggy-v8')).keys()).length);
   assert.ok(cached >= shell.length, `cached ${cached}`);
   await ctx.close();
 });

@@ -74,7 +74,7 @@ async function mockData(page, opts = {}) {
     }
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify(chart(sym, target.searchParams.get('range'), ...prices)) });
   };
-  await page.route(/corsproxy\.io|allorigins\.win|codetabs\.com/, handler);
+  await page.route(/workers\.dev|corsproxy\.io|allorigins\.win|codetabs\.com/, handler);
   return calls;
 }
 
