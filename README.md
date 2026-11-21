@@ -18,6 +18,12 @@ See [SPEC.md](SPEC.md) for the full v1 spec.
 
 ## Deploy
 
+### Cloudflare (app + relay in one Worker)
+
+`wrangler.jsonc` makes the `ziggy` Worker serve both the app and the Yahoo relay at `https://ziggy.g1011010.workers.dev`. Requests with `?url=` go to the relay, and everything else gets the app's files; `.assetsignore` keeps tests and config private. The Worker is connected to this repo (Cloudflare dashboard → Workers & Pages → ziggy → Settings → Build), so every push to `main` redeploys it.
+
+### GitHub Pages
+
 Every push to `main` deploys via `.github/workflows/pages.yml`. Before the first deploy, set this once in the repo: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
 
 ## Run locally

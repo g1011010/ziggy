@@ -1,0 +1,14 @@
+// Cloudflare Workers config: one Worker serves the app and the Yahoo relay.
+// Connected to GitHub (Workers Builds), every push to main redeploys it.
+{
+  "name": "ziggy",
+  "main": "worker/proxy.js",
+  "compatibility_date": "2025-01-01",
+  "assets": {
+    "directory": ".",
+    "binding": "ASSETS",
+    // The Worker sees every request first so /?url=… reaches the relay
+    // instead of returning index.html.
+    "run_worker_first": true
+  }
+}

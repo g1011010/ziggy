@@ -478,7 +478,7 @@ test('manifest and service worker are valid', async () => {
   await mockData(page);
   await page.goto(base);
   await page.evaluate(() => navigator.serviceWorker.ready);
-  const cached = await page.evaluate(async () => (await (await caches.open('ziggy-v8')).keys()).length);
+  const cached = await page.evaluate(async () => (await (await caches.open('ziggy-v9')).keys()).length);
   assert.ok(cached >= shell.length, `cached ${cached}`);
   await ctx.close();
 });

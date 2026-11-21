@@ -3,10 +3,9 @@
 // Market data (cross-origin) always goes to the network; the app keeps its
 // own last-known prices for offline display.
 
-const VERSION = 'ziggy-v8';
+const VERSION = 'ziggy-v9';
 const SHELL = [
   './',
-  'index.html',
   'manifest.webmanifest',
   'css/app.css',
   'js/app.js',
@@ -39,17 +38,21 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
+  // Relay calls (/?url=…) are live market data when the app and relay share a host: never cache.
+  if (url.searchParams.has('url')) return;
 
   // Navigations: network first so updates arrive, fall back to cached shell.
   if (e.request.mode === 'navigate') {
     e.respondWith(
       fetch(e.request)
         .then((res) => {
+          // Never cache redirects: Safari rejects them when replayed for navigation.
+          if (!res.ok || res.redirected) return res;
           const copy = res.clone();
-          caches.open(VERSION).then((c) => c.put('index.html', copy));
+          caches.open(VERSION).then((c) => c.put('./', copy));
           return res;
         })
-        .catch(() => caches.match('index.html')),
+        .catch(() => caches.match('./')),
     );
     return;
   }

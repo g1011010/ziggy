@@ -1,0 +1,12 @@
+# Only the app's own files are published as static assets.
+.git
+.github
+.gitignore
+.assetsignore
+.wrangler
+node_modules
+test
+worker
+wrangler.jsonc
+README.md
+SPEC.md
