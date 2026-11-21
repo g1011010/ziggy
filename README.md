@@ -20,7 +20,7 @@ See [SPEC.md](SPEC.md) for the full v1 spec.
 
 ### Cloudflare (app + relay in one Worker)
 
-`wrangler.jsonc` makes the `ziggy` Worker serve both the app and the Yahoo relay at `https://ziggy.g1011010.workers.dev`. Requests with `?url=` go to the relay, and everything else gets the app's files; `.assetsignore` keeps tests and config private. The Worker is connected to this repo (Cloudflare dashboard → Workers & Pages → ziggy → Settings → Build), so every push to `main` redeploys it.
+`wrangler.jsonc` makes the `ziggy` Worker serve both the app and the Yahoo relay at `https://ziggy.g1011010.workers.dev`. Requests with `?url=` go to the relay; everything else gets the app, whose files `scripts/build-worker.mjs` bundles into the Worker on each deploy. Deploy with `npx wrangler deploy`, or connect the repo in the Cloudflare dashboard (Workers & Pages → ziggy → Settings → Build) to redeploy on every push to `main`.
 
 ### GitHub Pages
 
