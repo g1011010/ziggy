@@ -52,7 +52,7 @@ To keep relays from rate-limiting the app, the whole watchlist is fetched in one
 
 1. Go to **dash.cloudflare.com → Workers & Pages → Create → Hello World**.
 2. Click **Edit code**, paste in `worker/proxy.js`, then click **Deploy**.
-3. In Ziggy, go to **Settings → Data source → Custom** and enter `https://<name>.<subdomain>.workers.dev/?url={url}`.
+3. In Ziggy, go to **Settings → Yahoo data source**, choose **My own relay**, and paste the worker address (e.g. `https://ziggy.<you>.workers.dev`).
 
 Data is often delayed and is **not suitable for trading decisions**.
 

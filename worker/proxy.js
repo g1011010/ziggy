@@ -31,10 +31,18 @@ export default {
       return new Response('Host not allowed', { status: 403, headers: CORS });
     }
 
-    const upstream = await fetch(target.toString(), {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ZiggyProxy/1.0)', Accept: 'application/json' },
-      cf: { cacheTtl: 10, cacheEverything: true }, // brief edge cache softens bursts
-    });
+    let upstream;
+    try {
+      upstream = await fetch(target.toString(), {
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ZiggyProxy/1.0)', Accept: 'application/json' },
+        cf: { cacheTtl: 10, cacheEverything: true }, // brief edge cache softens bursts
+      });
+    } catch (e) {
+      // Keep CORS headers on errors so the app sees a real message, not a CORS failure.
+      return new Response(JSON.stringify({ error: `Upstream fetch failed: ${e.message}` }), {
+        status: 502, headers: { ...CORS, 'Content-Type': 'application/json' },
+      });
+    }
     return new Response(upstream.body, {
       status: upstream.status,
       headers: {

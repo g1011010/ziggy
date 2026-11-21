@@ -1,5 +1,5 @@
 import { store } from './store.js';
-import { getQuotes, getSpark, getChart, peekChart, isChartFresh, search, fetchJSON, PROXIES, RANGES } from './api.js';
+import { getQuotes, getSpark, getChart, peekChart, isChartFresh, search, fetchJSON, proxyTemplate, PROXIES, RANGES } from './api.js';
 import { hasFinnhub, toFinnhub, fhName, fhTest } from './finnhub.js';
 import { evaluate, newAlert, notify, notificationState, requestNotifications } from './alerts.js';
 import { sparkline, detailChart } from './chart.js';
@@ -933,11 +933,11 @@ function renderSettings() {
         <select class="input" id="set-proxy">
           <option value="auto" ${s.proxy === 'auto' ? 'selected' : ''}>Automatic (try each, remember what works)</option>
           ${PROXIES.map((p) => `<option value="${p.id}" ${s.proxy === p.id ? 'selected' : ''}>${esc(p.name)} only</option>`).join('')}
-          <option value="custom" ${s.proxy === 'custom' ? 'selected' : ''}>Custom…</option>
+          <option value="custom" ${s.proxy === 'custom' ? 'selected' : ''}>My own relay (Cloudflare Worker)</option>
         </select>
       </label>
-      <label class="field" id="custom-wrap" ${s.proxy === 'custom' ? '' : 'hidden'}><span>Custom proxy URL — use <code>{url}</code> where the encoded Yahoo URL goes</span>
-        <input class="input" id="set-custom" value="${esc(s.customProxy)}" placeholder="https://my-proxy.example.workers.dev/?url={url}" spellcheck="false" autocapitalize="off">
+      <label class="field" id="custom-wrap" ${s.proxy === 'custom' ? '' : 'hidden'}><span>Relay address</span>
+        <input class="input" id="set-custom" type="url" value="${esc(s.customProxy)}" placeholder="https://ziggy.yourname.workers.dev" spellcheck="false" autocapitalize="off" autocomplete="off">
       </label>
       <div class="btn-row"><button class="btn" id="test-proxy">Test connection</button></div>
       <p class="notice" id="test-out" style="margin-top:10px">${s.lastGoodProxy ? `Last working: ${esc(PROXIES.find((p) => p.id === s.lastGoodProxy)?.name || s.lastGoodProxy)}` : ''}</p>
@@ -984,7 +984,7 @@ function renderSettings() {
   };
   $('#set-custom').onchange = (e) => {
     const v = e.target.value.trim();
-    if (v && !v.includes('{url}')) { toast('Check the URL', 'It must contain {url}', 'error'); return; }
+    if (v && !proxyTemplate(v)) { toast('Check the address', 'It should start with https://', 'error'); return; }
     store.setSettings({ customProxy: v });
   };
   $('#test-proxy').onclick = async () => {
@@ -995,7 +995,7 @@ function renderSettings() {
       const j = await fetchJSON('https://query1.finance.yahoo.com/v8/finance/chart/AAPL?range=1d&interval=1d');
       const p = j?.chart?.result?.[0]?.meta?.regularMarketPrice;
       if (p == null) throw new Error('Unexpected response');
-      const used = store.getSettings().proxy === 'custom' ? 'custom proxy' : (PROXIES.find((x) => x.id === store.getSettings().lastGoodProxy)?.name || 'proxy');
+      const used = store.getSettings().proxy === 'custom' ? 'Your relay' : (PROXIES.find((x) => x.id === store.getSettings().lastGoodProxy)?.name || 'proxy');
       out.innerHTML = `✅ Working via ${esc(used)} — AAPL ${fmtPrice(p)} (${Math.round(performance.now() - t0)} ms)`;
       refresh();
     } catch (e) {

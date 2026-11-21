@@ -430,6 +430,29 @@ test('finnhub: key is saved from Settings, used, and never exported', async () =
   await ctx.close();
 });
 
+test('own relay: bare address is accepted and used exclusively', async () => {
+  const { ctx, page, errors } = await newPage();
+  const calls = await mockData(page);
+  await page.goto(base);
+  const tpl = await page.evaluate(async () => {
+    const { proxyTemplate } = await import('./js/api.js');
+    return [proxyTemplate('https://ziggy.me.workers.dev'), proxyTemplate('https://ziggy.me.workers.dev/'), proxyTemplate('https://x.dev/?url={url}'), proxyTemplate('ziggy.me.workers.dev')];
+  });
+  assert.deepEqual(tpl, ['https://ziggy.me.workers.dev/?url={url}', 'https://ziggy.me.workers.dev/?url={url}', 'https://x.dev/?url={url}', null]);
+  await page.goto(base + '#/settings');
+  await page.selectOption('#set-proxy', 'custom');
+  await page.fill('#set-custom', 'https://api.allorigins.win/raw');
+  await page.click('#test-proxy');
+  await page.waitForSelector('#test-out:has-text("Working via Your relay")');
+  calls.length = 0;
+  await page.click('.tabbar a[data-tab="watchlist"]');
+  await page.click('#refresh-btn');
+  await page.waitForSelector('.toast:has-text("Prices updated")');
+  assert.ok(calls.length && calls.every((h) => h === 'api.allorigins.win'), calls.join(','));
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 test('manifest and service worker are valid', async () => {
   const m = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.webmanifest'), 'utf8'));
   assert.equal(m.display, 'standalone');
@@ -444,7 +467,7 @@ test('manifest and service worker are valid', async () => {
   await mockData(page);
   await page.goto(base);
   await page.evaluate(() => navigator.serviceWorker.ready);
-  const cached = await page.evaluate(async () => (await (await caches.open('ziggy-v6')).keys()).length);
+  const cached = await page.evaluate(async () => (await (await caches.open('ziggy-v7')).keys()).length);
   assert.ok(cached >= shell.length, `cached ${cached}`);
   await ctx.close();
 });

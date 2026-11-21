@@ -42,8 +42,9 @@ const health = {}; // proxy id -> { benchUntil, ms }
 
 function proxyOrder() {
   const s = store.getSettings();
-  if (s.proxy === 'custom' && s.customProxy.includes('{url}')) {
-    return [{ id: 'custom', name: 'Custom', tpl: s.customProxy }];
+  const custom = proxyTemplate(s.customProxy);
+  if (s.proxy === 'custom' && custom) {
+    return [{ id: 'custom', name: 'Your relay', tpl: custom }];
   }
   if (s.proxy !== 'auto') {
     const p = PROXIES.find((x) => x.id === s.proxy);
@@ -55,6 +56,19 @@ function proxyOrder() {
     (p.id === s.lastGoodProxy ? 0 : 1000) +
     (health[p.id]?.ms ?? 5000) / 10;
   return [...PROXIES].sort((a, b) => score(a) - score(b));
+}
+
+/**
+ * Turn what the user typed into a proxy template. Accepts a full template
+ * with {url}, or just a relay address like https://ziggy.me.workers.dev
+ * (then ?url={url} is added). Returns null if it isn't an https URL.
+ */
+export function proxyTemplate(input) {
+  const v = (input || '').trim();
+  if (!/^https:\/\/[^\s/]+/i.test(v)) return null;
+  if (v.includes('{url}')) return v;
+  const base = v.split(/[?#]/)[0].replace(/\/*$/, '/');
+  return `${base}?url={url}`;
 }
 
 /** Measured latency per proxy, for the Settings screen. */
